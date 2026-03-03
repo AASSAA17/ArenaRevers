@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: arenaserve-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - arenaserve-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: arenaserve-backend
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      API_PREFIX: /api
+      DATABASE_URL: postgresql://postgres:1234@host.docker.internal:5433/arenareserve?schema=public
+      REDIS_URL: redis://redis:6379
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-your-refresh-token-secret}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_51SbecmQR2DeIv4hUy8Q2UxShrTV4oIGVySV8Hb3liKaDhn4ZqKuLyTlcFgWv122WBWq0BkPfa06KV4wXD4WVG301007bCQqX4S}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-pk_test_51SbecmQR2DeIv4hU7npkvbsR8CB9VgMIom8LFsMHFiybIHvXKM5Ko4Aj7pCev7HsVNlXv5VjvgBSDeaWRRJWIDFQ00QbLdJgiJ}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_51SbecmQR2DeIv4hU0Yv5jV2004Qx8yPq4}
+      KASPI_API_URL: ${KASPI_API_URL:-https://api.kaspi.kz}
+      KASPI_API_KEY: ${KASPI_API_KEY:-}
+      KASPI_MERCHANT_ID: ${KASPI_MERCHANT_ID:-}
+      KASPI_WEBHOOK_SECRET: ${KASPI_WEBHOOK_SECRET:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-arenareserve-uploads}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      FRONTEND_URL: http://localhost:80
+      DEFAULT_TIMEZONE: Asia/Almaty
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend/public/uploads:/app/public/uploads
+      - ./backend/uploads:/app/uploads
+      - ./backend/logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >
+      sh -c "
+        echo 'Подключение к внешней базе данных на localhost:5433...' &&
+        sleep 5 &&
+        echo 'Создание схемы базы данных из schema.prisma...' &&
+        npx prisma db push --accept-data-loss --skip-generate &&
+        echo 'Схема создана' &&
+        echo 'Применение constraint...' &&
+        (PGPASSWORD=1234 psql -h host.docker.internal -p 5433 -U postgres -d arenareserve -f prisma/apply-constraint.sql 2>/dev/null || echo 'Constraint уже применен') &&
+        echo 'Помечаем миграцию как примененную...' &&
+        npx prisma migrate resolve --applied 20250101000000_add_booking_exclude_constraint 2>/dev/null || echo 'Миграция уже помечена' &&
+        echo 'Готово к запуску' &&
+        npm start
+      "
+    networks:
+      - arenaserve-network
+    restart: unless-stopped
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
+    container_name: arenaserve-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - arenaserve-network
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  arenaserve-network:
+    driver: bridge

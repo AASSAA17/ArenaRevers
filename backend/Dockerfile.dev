@@ -1,0 +1,44 @@
+# Backend Dockerfile для разработки
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Устанавливаем необходимые библиотеки для Prisma и PostgreSQL клиент
+RUN apk add --no-cache \
+    openssl \
+    openssl-dev \
+    libc6-compat \
+    postgresql-client \
+    && rm -rf /var/cache/apk/*
+
+# Копируем скрипт ожидания
+COPY wait-for-db.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/wait-for-db.sh
+
+# Устанавливаем nodemon глобально для hot reload
+RUN npm install -g nodemon
+
+# Копируем файлы зависимостей
+COPY package*.json ./
+
+# Устанавливаем все зависимости (включая dev)
+RUN npm install
+
+# Копируем prisma файлы (без миграций для генерации клиента)
+COPY prisma/schema.prisma ./prisma/
+COPY prisma/apply-constraint.sql ./prisma/
+
+# Генерируем Prisma Client (без миграций, чтобы избежать проверки)
+RUN npx prisma generate
+
+# Копируем остальные файлы
+COPY . .
+
+# Создаем директории для логов и загрузок
+RUN mkdir -p logs public/uploads uploads
+
+# Открываем порт
+EXPOSE 3000
+
+# Команда запуска в режиме разработки
+CMD ["npm", "run", "dev"]

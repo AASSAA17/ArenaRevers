@@ -1,0 +1,23 @@
+# Frontend Dockerfile для разработки
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Копируем файлы зависимостей
+COPY package*.json ./
+
+# Устанавливаем зависимости
+RUN npm install
+
+# Убеждаемся, что xlsx установлен
+RUN npm list xlsx || npm install xlsx
+
+# Копируем исходный код
+COPY . .
+
+# Открываем порт
+EXPOSE 3001
+
+# Команда запуска в режиме разработки
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--no-open"]
+
